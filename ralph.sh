@@ -4,6 +4,53 @@
 
 set -e
 
+# Colors for terminal output
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+BOLD='\033[1m'
+
+# Display progress tracker
+show_progress() {
+  if [ ! -f "$PRD_FILE" ]; then
+    return
+  fi
+
+  local total=$(jq '.userStories | length' "$PRD_FILE" 2>/dev/null || echo 0)
+  local passed=$(jq '[.userStories[] | select(.passes == true)] | length' "$PRD_FILE" 2>/dev/null || echo 0)
+  local remaining=$((total - passed))
+
+  echo ""
+  echo -e "${BOLD}┌─────────────────────────────────────────────────────────────┐${NC}"
+  echo -e "${BOLD}│                    PROGRESS TRACKER                         │${NC}"
+  echo -e "${BOLD}├─────────────────────────────────────────────────────────────┤${NC}"
+
+  # Progress bar
+  local bar_width=40
+  local filled=$((passed * bar_width / total))
+  local empty=$((bar_width - filled))
+  local bar=$(printf "%${filled}s" | tr ' ' '█')$(printf "%${empty}s" | tr ' ' '░')
+  local percent=$((passed * 100 / total))
+
+  echo -e "${BOLD}│${NC} Progress: ${GREEN}${bar}${NC} ${percent}%"
+  echo -e "${BOLD}│${NC} Stories:  ${GREEN}${passed} passed${NC} / ${YELLOW}${remaining} remaining${NC} / ${total} total"
+  echo -e "${BOLD}├─────────────────────────────────────────────────────────────┤${NC}"
+
+  # List stories with status
+  jq -r '.userStories[] | "\(.id)|\(.title)|\(.passes)"' "$PRD_FILE" 2>/dev/null | while IFS='|' read -r id title passes; do
+    if [ "$passes" = "true" ]; then
+      echo -e "${BOLD}│${NC} ${GREEN}✓${NC} ${id}: ${title:0:50}"
+    else
+      echo -e "${BOLD}│${NC} ${RED}○${NC} ${id}: ${title:0:50}"
+    fi
+  done
+
+  echo -e "${BOLD}└─────────────────────────────────────────────────────────────┘${NC}"
+  echo ""
+}
+
 # Parse arguments
 MAX_ITERATIONS=10
 
@@ -64,13 +111,14 @@ if [ ! -f "$PROGRESS_FILE" ]; then
   echo "---" >> "$PROGRESS_FILE"
 fi
 
-echo "Starting Ralph - Max iterations: $MAX_ITERATIONS"
+echo -e "${BOLD}Starting Ralph - Max iterations: $MAX_ITERATIONS${NC}"
+show_progress
 
 for i in $(seq 1 $MAX_ITERATIONS); do
   echo ""
-  echo "==============================================================="
-  echo "  Ralph Iteration $i of $MAX_ITERATIONS"
-  echo "==============================================================="
+  echo -e "${BLUE}===============================================================${NC}"
+  echo -e "${BLUE}  Ralph Iteration $i of $MAX_ITERATIONS${NC}"
+  echo -e "${BLUE}===============================================================${NC}"
 
   # Run Claude Code with the ralph prompt
   # --dangerously-skip-permissions for autonomous operation, --print for output
@@ -78,17 +126,20 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   
   # Check for completion signal
   if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
+    show_progress
     echo ""
-    echo "Ralph completed all tasks!"
-    echo "Completed at iteration $i of $MAX_ITERATIONS"
+    echo -e "${GREEN}${BOLD}✓ Ralph completed all tasks!${NC}"
+    echo -e "Completed at iteration $i of $MAX_ITERATIONS"
     exit 0
   fi
-  
-  echo "Iteration $i complete. Continuing..."
+
+  show_progress
+  echo -e "${YELLOW}Iteration $i complete. Continuing...${NC}"
   sleep 2
 done
 
+show_progress
 echo ""
-echo "Ralph reached max iterations ($MAX_ITERATIONS) without completing all tasks."
+echo -e "${RED}${BOLD}✗ Ralph reached max iterations ($MAX_ITERATIONS) without completing all tasks.${NC}"
 echo "Check $PROGRESS_FILE for status."
 exit 1
